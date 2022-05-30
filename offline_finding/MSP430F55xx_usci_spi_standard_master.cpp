@@ -30,6 +30,8 @@
 #include <msp430.h> 
 #include <stdint.h>
 #include <stdbool.h>
+#include "SHA_sha256.h"
+#include "uECC-handle.hpp"
 
 
 //******************************************************************************
@@ -437,7 +439,7 @@ void initSPI()
 //******************************************************************************
 
 
-int main(void) {
+int main_old(void) {
     WDTCTL = WDTPW | WDTHOLD;	// Stop watchdog timer
 
     increaseVCoreToLevel2();
@@ -571,4 +573,42 @@ void __attribute__ ((interrupt(PORT1_VECTOR))) Port_1 (void)
   P1IFG &= ~BIT1;                          // P1.1 IFG cleared
   P1IE &= ~BIT1;
   __bic_SR_register_on_exit(CPUOFF);      // Exit LPM0
+}
+
+
+extern "C" int RNG(uint8_t* dest, unsigned int size){
+	for(unsigned int x = 0; x < size; x++)
+		dest[x] = 0;
+	return 0;
+}
+
+void init(){
+	memcpy(private_key, private_key_init, 28);
+	cryptohandler = uECC(RNG);
+	cryptohandler.compute_public_key(private_key, public_key);
+}
+
+void generate_next_key(const uint8_t* in, uint8_t* private_key, uint8_t* public_key){
+	uint8_t hash[HASH_LENGTH];
+	createHash(in,28,hash);
+	memcpy(private_key,hash,28);
+	cryptohandler.compute_public_key(private_key, public_key);
+}
+
+extern "C" int main(void) {
+	init();
+	uint8_t empty[28];
+	memset(empty,0,28);
+	if(!memcmp(private_key_init,empty,28))
+		uart_mode();
+	set_addr_from_key();
+	fill_adv_template_from_key();
+
+	ll_init(&addr);
+	ll_set_advertising_data(offline_finding_adv_template, sizeof(offline_finding_adv_template));
+	ll_advertise_start(LL_PDU_ADV_NONCONN_IND, ADV_INTERVAL, LL_ADV_CH_ALL);
+
+	evt_loop_run();
+
+	return 0;
 }
